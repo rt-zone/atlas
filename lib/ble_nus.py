@@ -107,22 +107,24 @@ class BLEUART:
 
     def _irq(self, event, data):
         # Track connections so we can send notifications.
-        if event == _IRQ_CENTRAL_CONNECT:
-            conn_handle, _, _ = data
-            self._connections.add(conn_handle)
-        elif event == _IRQ_CENTRAL_DISCONNECT:
-            conn_handle, _, _ = data
-            if conn_handle in self._connections:
-                self._connections.remove(conn_handle)
-            # Start advertising again to allow a new connection.
-            self._advertise()
-        elif event == _IRQ_GATTS_WRITE:
-            conn_handle, value_handle = data
-            if conn_handle in self._connections and value_handle == self._rx_handle:
-                self._rx_buffer += self._ble.gatts_read(self._rx_handle)
-                if self._handler:
-                    self._handler()
-
+            if event == _IRQ_CENTRAL_CONNECT:
+                conn_handle, _, _ = data
+                self._connections.add(conn_handle)
+            elif event == _IRQ_CENTRAL_DISCONNECT:
+                conn_handle, _, _ = data
+                if conn_handle in self._connections:
+                    self._connections.remove(conn_handle)
+                # Start advertising again to allow a new connection.
+                self._advertise()
+            elif event == _IRQ_GATTS_WRITE:
+                conn_handle, value_handle = data
+                if conn_handle in self._connections and value_handle == self._rx_handle:
+                    self._rx_buffer += self._ble.gatts_read(self._rx_handle)
+                    if self._handler:
+                        try:
+                            self._handler()
+                        except Exception:
+                            print("Other Interrupt")
     def any(self):
         return len(self._rx_buffer)
 
