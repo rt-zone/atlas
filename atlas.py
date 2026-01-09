@@ -2,11 +2,19 @@ import time
 import math
 import _thread
 from machine import Pin, PWM, I2C, time_pulse_us
-from encoder import Encoder
-from pimoroni import PID
+from encoder import Encoder 
+from pimoroni import PID 
 import ssd1306
 
 class Atlas:
+    _instance = None
+
+    def __new__(cls, *args, **kwargs):
+        if cls._instance is None:
+            cls._instance = super(Atlas, cls).__new__(cls)
+            cls._instance._initialized = False
+        return cls._instance
+    
     def __init__(self,
         # motors
         left_in1_pin=6, left_in2_pin=7, right_in1_pin=5, right_in2_pin=4,
@@ -21,6 +29,10 @@ class Atlas:
         # buzzer
         buzzer_pin=19):
         
+        if self._initialized:
+            return
+        self._initialized = True
+        print("Atlas Initialized")
 
         # --- motors (PWMs) ---
         self.right_in1 = PWM(Pin(right_in1_pin))
@@ -217,6 +229,10 @@ class Atlas:
     def setMoveSpeed(self, percent):
         self.MoveSpeed = max(0, min(100, percent)) / 100.0
 
+    # Movement w/o PID
+    def setSpeed(self, letter, speed):
+        hi = 3
+
     # ---------------------------
     # helper used by both threaded and direct calls
     # ---------------------------
@@ -390,8 +406,24 @@ class Atlas:
             self._stop = False
 
     def moveBackwardCm(self, distance_cm):
-        # move backward by calling moveForwardCm with negative distance
         self.moveForwardCm(-distance_cm)
+
+    def moveForwardRotations(self, revs_needed):
+        wheel_circ = self.wheel_circ
+        distance_cm = revs_needed * wheel_circ
+        self.moveForwardCm(distance_cm)
+
+    def moveBackwardRotations(self, revs_needed):
+        self.moveForwardRotations(-revs_needed)
+
+    def moveForwardDegrees(self, distance_degs):
+        wheel_circ = self.wheel_circ
+        revs_needed = distance_degs * 360
+        distance_cm = revs_needed * wheel_circ
+        self.moveForwardCm(distance_cm)
+
+    def moveBackwardDegrees(self, distance_degs):
+        self.moveForwardDegrees(distance_degs)
 
     # ---------------------------
     # non-blocking helpers: start movement in a thread when available
@@ -417,4 +449,4 @@ class Atlas:
 
     def moveBackward(self):
         """Start moving backward indefinitely (non-blocking when _thread available)."""
-        self._start_threaded(self.moveForwardCm, -100000)
+        self._start_threaded(self.moveForwardCm, -100000)       
