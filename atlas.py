@@ -4,7 +4,7 @@ import _thread
 from machine import Pin, PWM, I2C, time_pulse_us
 from encoder import Encoder 
 from pimoroni import PID 
-import ssd1306
+import oled
 
 class Atlas:
     _instance = None
@@ -32,7 +32,6 @@ class Atlas:
         if self._initialized:
             return
         self._initialized = True
-        print("Atlas Initialized")
 
         # --- motors (PWMs) ---
         self.right_in1 = PWM(Pin(right_in1_pin))
@@ -49,7 +48,7 @@ class Atlas:
 
         # --- OLED ---
         self.i2c = I2C(i2c_id, scl=Pin(scl_pin), sda=Pin(sda_pin), freq=i2c_freq)
-        self.oled = ssd1306.SSD1306_I2C(128, 32, self.i2c)
+        self.oled = oled.OLED(self.i2c)
         self.vssa = 32
 
         # --- encoders ---
