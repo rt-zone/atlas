@@ -97,6 +97,8 @@ class Atlas:
 
         # move speed (0..1)
         self.MoveSpeed = 1.0
+        self.LeftSpeed = 1.0
+        self.RightSpeed = 1.0
 
         # internal control flags
         self._stop = False
@@ -226,11 +228,29 @@ class Atlas:
     # tune / speed
     # ---------------------------
     def setMoveSpeed(self, percent):
-        self.MoveSpeed = max(0, min(100, percent)) / 100.0
+        speed = max(0, min(100, percent)) / 100.0
+        self.MoveSpeed = speed
+        self.LeftSpeed = speed
+        self.RightSpeed = speed
 
     # Movement w/o PID
-    def setSpeed(self, letter, speed):
-        hi = 3
+    def setSpeed(self, letter, percent):
+        speed = max(0, min(100, percent)) / 100.0
+        if letter == 'A':
+            self.LeftSpeed = speed
+        else: 
+            self.RightSpeed = speed 
+
+        self.move(self.LeftSpeed, self.RightSpeed)
+    
+    def moveWithSpeeds(self, left, right):
+        left_speed = max(0, min(100, left)) / 100.0
+        right_speed = max(0, min(100, right)) / 100.0
+        self.LeftSpeed = left_speed
+        self.RightSpeed = right_speed
+        
+        self.move(self.LeftSpeed, self.RightSpeed)
+
 
     # ---------------------------
     # helper used by both threaded and direct calls
