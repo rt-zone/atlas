@@ -27,7 +27,7 @@ class Atlas:
         # line
         left_line=11, middle_line=10, right_line=9,
         # buzzer
-        buzzer_pin=19):
+        buzzer_pin=18):
         
         if self._initialized:
             return
@@ -69,9 +69,36 @@ class Atlas:
         # --- buzzer ---
         self.buzzer = PWM(Pin(buzzer_pin)) 
         self.buzzer.freq(560)
-        self._volume = 0.0
+        self._volume = 0.5
         self.buzzer.duty_u16(0)
 
+        self.NOTE = {
+            "B3": 247,
+            "C4": 262,
+            "CS4": 277,
+            "D4": 294,
+            "DS4": 311,
+            "E4": 330,
+            "FS4": 370,
+            "GS4": 415,
+            "B4": 494,
+            "G4": 392, # failure
+            "A5": 880, # success
+            "B5": 988,
+            "C5": 523,
+            "D5": 587,
+            "E5": 659,
+        }
+
+        self.success_melody = [
+            self.NOTE["A5"], self.NOTE["B5"], self.NOTE["C5"], self.NOTE["B5"], self.NOTE["C5"], 
+            self.NOTE["D5"], self.NOTE["C5"], self.NOTE["D5"], self.NOTE["E5"], self.NOTE["D5"], 
+            self.NOTE["E5"], self.NOTE["E5"]
+        ]
+
+        self.failure_melody = [
+            self.NOTE["G4"], self.NOTE["C4"], self.NOTE["C4"]
+        ]
 
         # --- PID setup (copy your tuned values) ---
         self.dt = 0.02
@@ -193,9 +220,41 @@ class Atlas:
         return self.values[2]
 
     # buzzer
+    def volume(self, v):
+        v = max(0.0, min(1.0, v))
+        self._volume = v        
+        duty = v ** math.e
+        self.buzzer.duty_u16(int(65535 * (duty / 2)))
+
+    def buzzerStop(self):
+        self.buzzer.duty_u16(0)
+
     def buzzerPlay(self, freq, volume, duration):
-        self.buzzer.freq(freq)
-        self.buzzer.duty_u16()
+        self.buzzer.freq(int(freq))
+        self.volume(volume)
+        time.sleep(duration)
+        self.buzzerStop()
+
+    def buzzerPlayBeep(self):
+        self.buzzerPlay(2000, self._volume, 0.1)
+
+    def buzzerPlayBoop(self):
+        self.buzzerPlay(800, self._volume, 0.2)
+
+    def success(self, volume=0.5):
+        for i in range(2):
+            for i in range(len(self.success_melody)):
+                note_freq = self.success_melody[i]
+                self.buzzerPlay(note_freq, volume, 0.07)
+
+            self.buzzerStop()
+            time.sleep(0.035)
+
+    def failure(self,volume=0.3):
+        for i in range(len(self.failure_melody)):
+            note_freq = self.failure_melody[i]
+            self.buzzerPlay(note_freq, volume, 0.25)
+        self.buzzerStop()
 
     # ---------------------------
     # motor helpers
@@ -218,7 +277,7 @@ class Atlas:
         self._stop = True
 
     def stopMove(self):
-        self._stop = True
+        self.stopMoveFunction()
         self.move(0, 0)
 
     # ---------------------------
