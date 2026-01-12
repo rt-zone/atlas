@@ -93,7 +93,7 @@ class Atlas:
         # movement parameters
         self.WHEEL_DIAMETER_CM = 4.5
         self.wheel_circ = math.pi * self.WHEEL_DIAMETER_CM
-        self.MAGIC_TURN_CONVERTER = 1.79
+        self.MAGIC_TURN_CONVERTER = 1.79    # maybe can be calculated
 
         # move speed (0..1)
         self.MoveSpeed = 1.0
@@ -101,9 +101,9 @@ class Atlas:
         self.RightSpeed = 1.0
 
         # internal control flags
-        self._stop = False
-        self._moving = False
-        self._move_thread_running = False
+        self._stop = False                  # stops a motor function
+        self._moving = False                # motor functions' state
+        self._move_thread_running = False   # motor thread's state
 
     # ---------------------------
     # peripheries
@@ -120,6 +120,17 @@ class Atlas:
         return distance
 
     # oled
+    def _print_line(self, msg):
+        line_height = 8
+        self.vssa -= line_height
+        if self.vssa < 0:
+            self.vssa = 0
+            return
+        # self.vscsad(self.vssa)
+        y = self.oled.height - line_height - self.vssa
+        self.oled.text(msg, 0, y)
+        self.oled.show()
+
     def displayPrint(self, *args):
         max_chars = self.oled.width // 8
         msg = ("".join(str(a) for a in args))
@@ -134,17 +145,6 @@ class Atlas:
             
         if line:
             self._print_line(line)
-
-    def _print_line(self, msg):
-        line_height = 8
-        self.vssa -= line_height
-        if self.vssa < 0:
-            self.vssa = 0
-            return
-        # self.vscsad(self.vssa)
-        y = self.oled.height - line_height - self.vssa
-        self.oled.text(msg, 0, y)
-        self.oled.show()
 
     def displayClear(self):
         self.vssa = 32
@@ -214,14 +214,11 @@ class Atlas:
         self.set_motor(self.left_in1, self.left_in2, left_speed)
         self.set_motor(self.right_in1, self.right_in2, right_speed)
 
-    def stopMove(self, wait=True):
-        """Request stop. If wait=True, block until movement loop has exited."""
+    def stopMoveFunction(self):
         self._stop = True
-        # give the running thread/loop a little time to stop
-        if wait:
-            while self._moving:
-                time.sleep(0.005)
-        # ensure motors off
+
+    def stopMove(self):
+        self._stop = True
         self.move(0, 0)
 
     # ---------------------------
@@ -241,6 +238,7 @@ class Atlas:
         else: 
             self.RightSpeed = speed 
 
+        self.stopMoveFunction()
         self.move(self.LeftSpeed, self.RightSpeed)
     
     def moveWithSpeeds(self, left, right):
@@ -249,6 +247,7 @@ class Atlas:
         self.LeftSpeed = left_speed
         self.RightSpeed = right_speed
         
+        self.stopMoveFunction()
         self.move(self.LeftSpeed, self.RightSpeed)
 
 
@@ -295,7 +294,9 @@ class Atlas:
         try:
             while True:
                 if self._stop:
-                    break
+                    self._moving = False
+                    self._stop = False
+                    return
 
                 left_cap  = self.left_enc.capture()
                 right_cap = self.right_enc.capture()
@@ -354,10 +355,7 @@ class Atlas:
     # ---------------------------
     def moveForwardCm(self, distance_cm):
         # distance_cm can be negative for backwards motion
-        MoveSpeed = self.MoveSpeed
-        wheel_circ = self.wheel_circ
-
-        revs_needed = distance_cm / wheel_circ
+        revs_needed = distance_cm / self.wheel_circ
         degrees_needed = abs(revs_needed * 360)
 
         start_left = self.left_enc.capture().degrees
@@ -376,7 +374,9 @@ class Atlas:
         try:
             while True:
                 if self._stop:
-                    break
+                    self._moving = False
+                    self._stop = False
+                    return
 
                 left_cap  = self.left_enc.capture()
                 right_cap = self.right_enc.capture()
@@ -428,17 +428,15 @@ class Atlas:
         self.moveForwardCm(-distance_cm)
 
     def moveForwardRotations(self, revs_needed):
-        wheel_circ = self.wheel_circ
-        distance_cm = revs_needed * wheel_circ
+        distance_cm = revs_needed * self.wheel_circ
         self.moveForwardCm(distance_cm)
 
     def moveBackwardRotations(self, revs_needed):
         self.moveForwardRotations(-revs_needed)
 
     def moveForwardDegrees(self, distance_degs):
-        wheel_circ = self.wheel_circ
         revs_needed = distance_degs * 360
-        distance_cm = revs_needed * wheel_circ
+        distance_cm = revs_needed * self.wheel_circ
         self.moveForwardCm(distance_cm)
 
     def moveBackwardDegrees(self, distance_degs):
@@ -461,11 +459,13 @@ class Atlas:
 
         _thread.start_new_thread(thread_target, (args,))
 
-    # public convenience methods that return immediately (if _thread is available)
+    # infinite movement methods that return immediately (if _thread is available)
     def moveForward(self):
+        self.stopMoveFunction()       
         """Start moving forward indefinitely (non-blocking when _thread available)."""
         self._start_threaded(self.moveForwardCm, 100000)
 
     def moveBackward(self):
+        self.stopMoveFunction()
         """Start moving backward indefinitely (non-blocking when _thread available)."""
         self._start_threaded(self.moveForwardCm, -100000)       
