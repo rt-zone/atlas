@@ -69,7 +69,7 @@ class Atlas:
         # --- buzzer ---
         self.buzzer = PWM(Pin(buzzer_pin)) 
         self.buzzer.freq(560)
-        self._volume = 0.5
+        self._volume = 50
         self.buzzer.duty_u16(0)
 
         self.NOTE = {
@@ -82,7 +82,7 @@ class Atlas:
             "FS4": 370,
             "GS4": 415,
             "B4": 494,
-            "G4": 392, # failure
+            "G4": 392, # fail
             "A5": 880, # success
             "B5": 988,
             "C5": 523,
@@ -96,7 +96,7 @@ class Atlas:
             self.NOTE["E5"], self.NOTE["E5"]
         ]
 
-        self.failure_melody = [
+        self.fail_melody = [
             self.NOTE["G4"], self.NOTE["C4"], self.NOTE["C4"]
         ]
 
@@ -220,8 +220,8 @@ class Atlas:
         return self.values[2]
 
     # buzzer
-    def volume(self, v):
-        v = max(0.0, min(1.0, v))
+    def buzzerSetVolume(self, v):
+        v = max(0.0, min(1.0, v / 100))
         self._volume = v        
         duty = v ** math.e
         self.buzzer.duty_u16(int(65535 * (duty / 2)))
@@ -231,7 +231,7 @@ class Atlas:
 
     def buzzerPlay(self, freq, volume, duration):
         self.buzzer.freq(int(freq))
-        self.volume(volume)
+        self.buzzerSetVolume(volume)
         time.sleep(duration)
         self.buzzerStop()
 
@@ -241,7 +241,7 @@ class Atlas:
     def buzzerPlayBoop(self):
         self.buzzerPlay(800, self._volume, 0.2)
 
-    def success(self, volume=0.5):
+    def buzzerPlaySuccess(self, volume=50):
         for i in range(2):
             for i in range(len(self.success_melody)):
                 note_freq = self.success_melody[i]
@@ -250,9 +250,9 @@ class Atlas:
             self.buzzerStop()
             time.sleep(0.035)
 
-    def failure(self,volume=0.3):
-        for i in range(len(self.failure_melody)):
-            note_freq = self.failure_melody[i]
+    def buzzerPlayFail(self, volume=30):
+        for i in range(len(self.fail_melody)):
+            note_freq = self.fail_melody[i]
             self.buzzerPlay(note_freq, volume, 0.25)
         self.buzzerStop()
 
@@ -309,7 +309,68 @@ class Atlas:
         self.stopMoveFunction()
         self.move(self.LeftSpeed, self.RightSpeed)
 
+    # ---------------------------
+    # single motor movement
+    # ---------------------------
+    def moveMotorDegrees(self, letter, distance_deg):
+        direction = 1 if distance_deg >= 0 else -1
+        distance_deg = abs(distance_deg)
 
+        if letter == 'A':
+            start_left = self.left_enc.capture().degrees
+            self.set_motor(self.left_in1, self.left_in2, self.LeftSpeed * direction)
+
+            try: 
+                while True:
+                    left_cap  = self.left_enc.capture().degrees
+                    left_travel = abs(left_cap - start_left)
+                    if (left_travel >= distance_deg):
+                        break
+            finally:
+                self.set_motor(self.left_in1, self.left_in2, 0)
+
+        else: 
+            start_right = self.right_enc.capture().degrees
+            self.set_motor(self.right_in1, self.right_in2, self.RightSpeed * direction)
+            
+            try: 
+                while True:
+                    right_cap = self.right_enc.capture().degrees
+                    right_travel = abs(right_cap - start_right)
+                    if (right_travel >= distance_deg):
+                        break
+            finally:
+                self.set_motor(self.left_in1, self.left_in2, 0)
+
+    def moveMotorRotations(self, letter, distance_rev):
+        distance_deg = distance_rev * 360
+        self.moveMotorDegrees(letter, distance_deg)
+
+    def moveMotorCm(self, letter, distance_cm):
+        distance_rev = distance_cm / self.wheel_circ
+        distance_deg = distance_rev * 360
+        self.moveMotorDegrees(letter, distance_deg)
+
+    def moveMotorSeconds(self, letter, seconds): # negative seconds for reverse direction lol
+        direction = 1 if seconds >= 0 else -1
+        seconds = abs(seconds)
+
+        if letter == 'A':
+            self.set_motor(self.left_in1, self.left_in2, self.LeftSpeed * direction)
+            time.sleep(seconds)
+            self.set_motor(self.left_in1, self.left_in2, 0)
+            
+        else: 
+            self.set_motor(self.right_in1, self.right_in2, self.RightSpeed * direction)
+            time.sleep(seconds)
+            self.set_motor(self.left_in1, self.left_in2, 0)
+
+    def stopMotor(self, letter):
+        if letter == 'A':
+            self.set_motor(self.left_in1, self.left_in2, 0)
+        else:
+            self.set_motor(self.right_in1, self.right_in2, 0)
+    
     # ---------------------------
     # helper used by both threaded and direct calls
     # ---------------------------
@@ -337,13 +398,13 @@ class Atlas:
             a = -1
         turn_degrees = abs(turn_degrees)
 
-        degrees_wheels = turn_degrees * self.MAGIC_TURN_CONVERTER
+        distance_deg = turn_degrees * self.MAGIC_TURN_CONVERTER
 
         start_left = self.left_enc.capture().degrees
         start_right = self.right_enc.capture().degrees
 
-        self.left_pos_pid.setpoint = degrees_wheels
-        self.right_pos_pid.setpoint = degrees_wheels
+        self.left_pos_pid.setpoint = distance_deg
+        self.right_pos_pid.setpoint = distance_deg
 
         last_left_cmd = 0.15 * a
         last_right_cmd = 0.15 * (-a)
@@ -364,7 +425,7 @@ class Atlas:
                 right_travel = (right_cap.degrees - start_right) * (-a)
                 travel = (left_travel + right_travel) / 2
 
-                if (travel >= degrees_wheels):
+                if (travel >= distance_deg):
                     break
 
                 left_speed = (left_cap.revolutions_per_second * a) / 4
@@ -373,7 +434,7 @@ class Atlas:
                 left_vel = self.left_pos_pid.calculate(left_travel)
                 right_vel = self.right_pos_pid.calculate(right_travel)
 
-                k = self._find_k(travel, degrees_wheels)
+                k = self._find_k(travel, distance_deg)
 
                 self.left_vel_pid.setpoint = max(min(left_vel, k), -k)
                 self.right_vel_pid.setpoint = max(min(right_vel, k), -k)
@@ -414,19 +475,19 @@ class Atlas:
     # ---------------------------
     def moveForwardCm(self, distance_cm):
         # distance_cm can be negative for backwards motion
-        revs_needed = distance_cm / self.wheel_circ
-        degrees_needed = abs(revs_needed * 360)
+        distance_rev = distance_cm / self.wheel_circ
+        distance_deg = abs(distance_rev * 360)
 
         start_left = self.left_enc.capture().degrees
         start_right = self.right_enc.capture().degrees
 
-        self.left_pos_pid_f.setpoint = degrees_needed
-        self.right_pos_pid_f.setpoint = degrees_needed
+        self.left_pos_pid_f.setpoint = distance_deg
+        self.right_pos_pid_f.setpoint = distance_deg
 
         last_left_cmd = 0.0
         last_right_cmd = 0.0
 
-        forward_direction = 1 if distance_cm >= 0 else -1
+        direction = 1 if distance_cm >= 0 else -1
 
         self._stop = False
         self._moving = True
@@ -445,7 +506,7 @@ class Atlas:
                 right_travel = abs(right_cap.degrees - start_right)
                 traveled = (left_travel + right_travel) / 2
 
-                if degrees_needed != math.inf and (traveled >= degrees_needed):
+                if distance_deg != math.inf and (traveled >= distance_deg):
                     break
 
                 left_speed = left_cap.revolutions_per_second / 4
@@ -454,7 +515,7 @@ class Atlas:
                 left_vel = self.left_pos_pid_f.calculate(left_travel)
                 right_vel = self.right_pos_pid_f.calculate(right_travel)
 
-                k = self._find_k(traveled, degrees_needed if degrees_needed != math.inf else 1000)
+                k = self._find_k(traveled, distance_deg if distance_deg != math.inf else 1000)
 
                 self.left_vel_pid_f.setpoint = max(min(left_vel, self.MoveSpeed), -self.MoveSpeed)
                 self.right_vel_pid_f.setpoint = max(min(right_vel, self.MoveSpeed), -self.MoveSpeed)
@@ -475,7 +536,7 @@ class Atlas:
                 last_right_cmd = max(min(last_right_cmd, self.MoveSpeed), 0)
 
                 # apply forward/backward direction
-                self.move(last_left_cmd * forward_direction, last_right_cmd * forward_direction)
+                self.move(last_left_cmd * direction, last_right_cmd * direction)
 
                 time.sleep(self.dt)
         finally:
@@ -486,20 +547,20 @@ class Atlas:
     def moveBackwardCm(self, distance_cm):
         self.moveForwardCm(-distance_cm)
 
-    def moveForwardRotations(self, revs_needed):
-        distance_cm = revs_needed * self.wheel_circ
+    def moveForwardRotations(self, distance_rev):
+        distance_cm = distance_rev * self.wheel_circ
         self.moveForwardCm(distance_cm)
 
-    def moveBackwardRotations(self, revs_needed):
-        self.moveForwardRotations(-revs_needed)
+    def moveBackwardRotations(self, distance_rev):
+        self.moveForwardRotations(-distance_rev)
 
-    def moveForwardDegrees(self, distance_degs):
-        revs_needed = distance_degs * 360
-        distance_cm = revs_needed * self.wheel_circ
+    def moveForwardDegrees(self, distance_deg):
+        distance_rev = distance_deg * 360
+        distance_cm = distance_rev * self.wheel_circ
         self.moveForwardCm(distance_cm)
 
-    def moveBackwardDegrees(self, distance_degs):
-        self.moveForwardDegrees(distance_degs)
+    def moveBackwardDegrees(self, distance_deg):
+        self.moveForwardDegrees(distance_deg)
 
     # ---------------------------
     # non-blocking helpers: start movement in a thread when available
