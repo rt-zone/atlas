@@ -40,7 +40,7 @@ class Atlas:
         self.left_in2 = PWM(Pin(left_in2_pin))
 
         for m in (self.left_in1, self.left_in2, self.right_in1, self.right_in2):
-            m.freq(1000)
+            m.freq(20000)
 
         # --- ultrasonic ---
         self.echo = Pin(echo_pin, Pin.IN)
@@ -113,9 +113,9 @@ class Atlas:
         # alternate pid for movement 
         self.left_pos_pid_f  = PID(0.002, 0.0, 0, self.dt)
         self.right_pos_pid_f = PID(0.002, 0.0, 0, self.dt)
-        self.left_vel_pid_f  = PID(36, 0.0, 0.01, self.dt)
-        self.right_vel_pid_f = PID(36, 0.0, 0.01, self.dt)
-        self.align_pid_f = PID(0.00072, 0.0, 0, self.dt)
+        self.left_vel_pid_f  = PID(36, 0.0, 0.0005, self.dt)
+        self.right_vel_pid_f = PID(36, 0.0, 0.0005, self.dt)
+        self.align_pid_f = PID(0.00072, 0.0, 0.0001, self.dt)
 
         # movement parameters
         self.WHEEL_DIAMETER_CM = 4.5
@@ -276,6 +276,11 @@ class Atlas:
         self.set_motor(self.left_in1, self.left_in2, left_speed)
         self.set_motor(self.right_in1, self.right_in2, right_speed)
 
+    def relMove(self, left_speed, right_speed):
+        left_speed = left_speed ** 0.15
+        right_speed = right_speed ** 0.15
+        self.move(left_speed, right_speed)
+
     def stopMoveFunction(self):
         self._stop = True
 
@@ -299,9 +304,6 @@ class Atlas:
             self.LeftSpeed = speed
         else: 
             self.RightSpeed = speed 
-
-        self.stopMoveFunction()
-        self.move(self.LeftSpeed, self.RightSpeed)
     
     def moveWithSpeeds(self, left, right):
         left_speed = max(0, min(100, left)) / 100.0
@@ -310,7 +312,7 @@ class Atlas:
         self.RightSpeed = right_speed
         
         self.stopMoveFunction()
-        self.move(self.LeftSpeed, self.RightSpeed)
+        self.relMove(self.LeftSpeed, self.RightSpeed)
 
     # ---------------------------
     # single motor movement
@@ -378,7 +380,7 @@ class Atlas:
     # helper used by both threaded and direct calls
     # ---------------------------
     def _find_k(self, travel, degrees_need):
-        mds = 500
+        mds = 100
         mdt = 500
         k = 1
         remaining = degrees_need - travel
@@ -390,7 +392,7 @@ class Atlas:
         else:
             if travel <= mds:
                 k = travel / mds
-        return max(0.15, min(1, k))
+        return max(0.2, min(1, k))
 
     # ---------------------------
     # turning (will also honor stop flag)
@@ -494,6 +496,7 @@ class Atlas:
 
         self._stop = False
         self._moving = True
+        self.speeds = []
         try:
             while True:
                 if self._stop:
@@ -509,7 +512,7 @@ class Atlas:
                 right_travel = abs(right_cap.degrees - start_right)
                 traveled = (left_travel + right_travel) / 2
 
-                if distance_deg != math.inf and (traveled >= distance_deg):
+                if distance_deg != math.inf and (left_travel >= distance_deg) and (right_travel >= distance_deg):
                     break
 
                 left_speed = left_cap.revolutions_per_second / 4
@@ -539,13 +542,17 @@ class Atlas:
                 last_right_cmd = max(min(last_right_cmd, self.MoveSpeed), 0)
 
                 # apply forward/backward direction
-                self.move(last_left_cmd * direction, last_right_cmd * direction)
+                self.speeds.append(int(last_left_cmd))
+                self.relMove(last_left_cmd * direction, last_right_cmd * direction)
 
                 time.sleep(self.dt)
         finally:
             self.move(0, 0)
             self._moving = False
             self._stop = False
+            time.sleep(2)
+            # self.displayPrint(left_travel, '\n', right_travel)
+            self.displayPrint(self.speeds)
 
     def moveBackwardCm(self, distance_cm):
         self.moveForwardCm(-distance_cm)
