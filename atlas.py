@@ -220,18 +220,21 @@ class Atlas:
         return self.values[2]
 
     # buzzer
-    def buzzerSetVolume(self, v):
+    def buzzerVolume(self, v):
         v = max(0.0, min(1.0, v / 100))
-        self._volume = v        
         duty = v ** math.e
         self.buzzer.duty_u16(int(65535 * (duty / 2)))
+
+    def buzzerSetVolume(self, v):
+        self._volume = v     
+        self.buzzerVolume(v)   
 
     def buzzerStop(self):
         self.buzzer.duty_u16(0)
 
     def buzzerPlay(self, freq, volume, duration):
         self.buzzer.freq(int(freq))
-        self.buzzerSetVolume(volume)
+        self.buzzerVolume(volume)
         time.sleep(duration)
         self.buzzerStop()
 
@@ -241,19 +244,19 @@ class Atlas:
     def buzzerPlayBoop(self):
         self.buzzerPlay(800, self._volume, 0.2)
 
-    def buzzerPlaySuccess(self, volume=50):
+    def buzzerPlaySuccess(self):
         for i in range(2):
             for i in range(len(self.success_melody)):
                 note_freq = self.success_melody[i]
-                self.buzzerPlay(note_freq, volume, 0.07)
+                self.buzzerPlay(note_freq, self._volume, 0.07)
 
             self.buzzerStop()
             time.sleep(0.035)
 
-    def buzzerPlayFail(self, volume=30):
+    def buzzerPlayFail(self):
         for i in range(len(self.fail_melody)):
             note_freq = self.fail_melody[i]
-            self.buzzerPlay(note_freq, volume, 0.25)
+            self.buzzerPlay(note_freq, self._volume / 2, 0.25)
         self.buzzerStop()
 
     # ---------------------------
