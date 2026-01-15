@@ -104,11 +104,11 @@ class Atlas:
         self.dt = 0.02
         
         # pid for turn
-        self.left_pos_pid  = PID(0.002, 0.0, 0, self.dt)
-        self.right_pos_pid = PID(0.002, 0.0, 0, self.dt)
-        self.left_vel_pid  = PID(18, 0.0, 0.001, self.dt)
-        self.right_vel_pid = PID(18, 0.0, 0.001, self.dt)
-        self.align_pid = PID(0.0005, 0.0, 0, self.dt)
+        self.left_pos_pid  = PID(0.005, 0.0, 0, self.dt)
+        self.right_pos_pid = PID(0.005, 0.0, 0, self.dt)
+        self.left_vel_pid  = PID(10, 0.0, 0.001, self.dt)
+        self.right_vel_pid = PID(10, 0.0, 0.001, self.dt)
+        self.align_pid = PID(0, 0.0, 0, self.dt)
 
         # alternate pid for movement 
         self.left_pos_pid_f  = PID(0.002, 0.0, 0, self.dt)
@@ -259,6 +259,12 @@ class Atlas:
             self.buzzerPlay(note_freq, self._volume / 2, 0.25)
         self.buzzerStop()
 
+    def say(self, *args):
+        self.buzzerPlay(880, self._volume, 0.1)
+        self.buzzerPlay(988, self._volume, 0.1)
+        self.displayClear()
+        self.displayPrint(*args)
+
     # ---------------------------
     # motor helpers
     # ---------------------------
@@ -277,9 +283,15 @@ class Atlas:
         self.set_motor(self.right_in1, self.right_in2, right_speed)
 
     def relMove(self, left_speed, right_speed):
-        left_speed = left_speed ** 0.15
-        right_speed = right_speed ** 0.15
-        self.move(left_speed, right_speed)
+        l = 1
+        r = 1
+        if left_speed <= 0:
+            l = -1
+        if right_speed <= 0:
+            r = -1
+        left_speed = abs(left_speed) ** 0.15
+        right_speed = abs(right_speed) ** 0.15
+        self.move(left_speed * l, right_speed * r)
 
     def stopMoveFunction(self):
         self._stop = True
@@ -287,6 +299,21 @@ class Atlas:
     def stopMove(self):
         self.stopMoveFunction()
         self.move(0, 0)
+    
+    def stopSmooth(self, left_speed, right_speed):
+        l = -1
+        r = -1
+        if left_speed <= 0:
+            l = 1
+        if right_speed <= 0:
+            r = 1
+        sleep_time = (left_speed + right_speed) / 40
+        self.move(l,r)
+        time.sleep(sleep_time)
+        self.move(0,0)
+        self.displayClear()
+        self.displayPrint(left_speed, '\n', right_speed)
+        time.sleep(1)
 
     # ---------------------------
     # tune / speed
@@ -381,18 +408,23 @@ class Atlas:
     # ---------------------------
     def _find_k(self, travel, degrees_need):
         mds = 100
-        mdt = 500
+        mdt = 100
         k = 1
-        remaining = degrees_need - travel
         if degrees_need < (mds + mdt):
             ds = degrees_need / 3
-            dt = ds
             if travel <= ds:
                 k = travel / ds
         else:
             if travel <= mds:
                 k = travel / mds
         return max(0.2, min(1, k))
+
+    def _find_k_turn(self, travel, degrees_need):
+        mds = 50
+        k = 1
+        if travel <= mds:
+            k = (travel / mds) * 0.4
+        return max(0.1, min(0.4, k))
 
     # ---------------------------
     # turning (will also honor stop flag)
@@ -405,14 +437,42 @@ class Atlas:
 
         distance_deg = turn_degrees * self.MAGIC_TURN_CONVERTER
 
+        if turn_degrees >= 360:
+            distance_to_stop = 62 # 360+
+            print("360")
+        elif turn_degrees >= 270:
+            distance_to_stop = 70 # 270
+            print("270")
+        elif turn_degrees >= 180:
+            distance_to_stop = 70 # 180
+            print("180")
+        elif turn_degrees >= 90: 
+            distance_to_stop = 74 # 90
+            print("90")
+        elif turn_degrees >= 80:
+            distance_to_stop = 70 # 70
+            print("80")
+        elif turn_degrees >= 70:
+            distance_to_stop = 60 # 70
+            print("70")
+        elif turn_degrees >= 60:
+            distance_to_stop = 50 # 60
+            print("60")
+        elif turn_degrees >= 45:
+            distance_to_stop = 25 # 45
+            print("45")
+        else:
+            distance_to_stop = turn_degrees / 2 
+
+
         start_left = self.left_enc.capture().degrees
         start_right = self.right_enc.capture().degrees
 
         self.left_pos_pid.setpoint = distance_deg
         self.right_pos_pid.setpoint = distance_deg
 
-        last_left_cmd = 0.15 * a
-        last_right_cmd = 0.15 * (-a)
+        last_left_cmd = 0.0
+        last_right_cmd = 0.0
 
         self._stop = False
         self._moving = True
@@ -430,16 +490,17 @@ class Atlas:
                 right_travel = (right_cap.degrees - start_right) * (-a)
                 travel = (left_travel + right_travel) / 2
 
-                if (travel >= distance_deg):
-                    break
-
                 left_speed = (left_cap.revolutions_per_second * a) / 4
                 right_speed = (right_cap.revolutions_per_second * (-a)) / 4
+
+                if (travel >= distance_deg - distance_to_stop):
+                    self.stopSmooth(left_speed * (-a), right_speed * a)
+                    break
 
                 left_vel = self.left_pos_pid.calculate(left_travel)
                 right_vel = self.right_pos_pid.calculate(right_travel)
 
-                k = self._find_k(travel, distance_deg)
+                k = self._find_k_turn(travel, distance_deg)
 
                 self.left_vel_pid.setpoint = max(min(left_vel, k), -k)
                 self.right_vel_pid.setpoint = max(min(right_vel, k), -k)
@@ -461,13 +522,19 @@ class Atlas:
 
                 final_left = last_left_cmd * a
                 final_right = last_right_cmd * (-a)
-                self.move(final_left, final_right)
+                self.relMove(final_left, final_right)
 
                 time.sleep(self.dt)
         finally:
             self.move(0, 0)
             self._moving = False
             self._stop = False
+            time.sleep(3)
+            left_travel = (self.left_enc.capture().degrees - start_left) * a
+            right_travel = (self.right_enc.capture().degrees - start_right) * (-a)
+            travel = (left_travel + right_travel) / 2
+            self.displayClear()
+            self.displayPrint(distance_deg, "\n", travel)
 
     def turnRightDegrees(self, degrees):
         self.turn(degrees)
@@ -481,7 +548,7 @@ class Atlas:
     def moveForwardCm(self, distance_cm):
         # distance_cm can be negative for backwards motion
         distance_rev = distance_cm / self.wheel_circ
-        distance_deg = abs(distance_rev * 360)
+        distance_deg = abs(distance_rev * 360) + 90
 
         start_left = self.left_enc.capture().degrees
         start_right = self.right_enc.capture().degrees
@@ -496,7 +563,6 @@ class Atlas:
 
         self._stop = False
         self._moving = True
-        self.speeds = []
         try:
             while True:
                 if self._stop:
@@ -512,11 +578,12 @@ class Atlas:
                 right_travel = abs(right_cap.degrees - start_right)
                 traveled = (left_travel + right_travel) / 2
 
-                if distance_deg != math.inf and (left_travel >= distance_deg) and (right_travel >= distance_deg):
-                    break
-
                 left_speed = left_cap.revolutions_per_second / 4
                 right_speed = right_cap.revolutions_per_second / 4
+
+                if distance_deg != math.inf and (traveled >= distance_deg - 90):
+                    self.stopSmooth(left_speed, right_speed)
+                    break
 
                 left_vel = self.left_pos_pid_f.calculate(left_travel)
                 right_vel = self.right_pos_pid_f.calculate(right_travel)
@@ -542,7 +609,6 @@ class Atlas:
                 last_right_cmd = max(min(last_right_cmd, self.MoveSpeed), 0)
 
                 # apply forward/backward direction
-                self.speeds.append(int(last_left_cmd))
                 self.relMove(last_left_cmd * direction, last_right_cmd * direction)
 
                 time.sleep(self.dt)
@@ -550,9 +616,6 @@ class Atlas:
             self.move(0, 0)
             self._moving = False
             self._stop = False
-            time.sleep(2)
-            # self.displayPrint(left_travel, '\n', right_travel)
-            self.displayPrint(self.speeds)
 
     def moveBackwardCm(self, distance_cm):
         self.moveForwardCm(-distance_cm)
