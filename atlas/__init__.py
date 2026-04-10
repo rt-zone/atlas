@@ -3,8 +3,19 @@ import math
 import _thread
 from machine import Pin, PWM, I2C, time_pulse_us
 from encoder import Encoder 
-from pimoroni import PID 
-import oled
+from PID import PID 
+from SSD1306 import SSD1306 as OLED
+
+# TODO:
+# Encoder library only accepts integer value for pins
+# Encoder pins are definied in Artiware through strings 
+# Temporary solution manually re-define encoder values here 
+ENC_A1	= 0
+ENC_A2	= 1
+ENC_B1	= 3
+ENC_B2	= 2
+
+PWM_FREQ = 20_000
 
 class Atlas:
     _instance = None
@@ -15,48 +26,35 @@ class Atlas:
             cls._instance._initialized = False
         return cls._instance
     
-    def __init__(self,
-        # motors
-        left_in1_pin=6, left_in2_pin=7, right_in1_pin=5, right_in2_pin=4,
-        # ultrasonic
-        echo_pin=13, trigger_pin=12,
-        # oled i2c
-        i2c_id=1, scl_pin=15, sda_pin=14, i2c_freq=400000,
-        # encoders
-        left_a=3, left_b=2, right_a=0, right_b=1,
-        # line
-        left_line=11, middle_line=10, right_line=9,
-        # buzzer
-        buzzer_pin=18):
-        
+    def __init__(self):
         if self._initialized:
             return
         self._initialized = True
 
         # --- motors (PWMs) ---
-        self.right_in1 = PWM(Pin(right_in1_pin))
-        self.right_in2 = PWM(Pin(right_in2_pin))
-        self.left_in1 = PWM(Pin(left_in1_pin))
-        self.left_in2 = PWM(Pin(left_in2_pin))
-
-        for m in (self.left_in1, self.left_in2, self.right_in1, self.right_in2):
-            m.freq(20000)
+        self.right_in1 = PWM(Pin("MOTOR_A1"), freq=PWM_FREQ)
+        self.right_in2 = PWM(Pin("MOTOR_A2"), freq=PWM_FREQ)
+        self.left_in1 = PWM(Pin("MOTOR_B1"), freq=PWM_FREQ)
+        self.left_in2 = PWM(Pin("MOTOR_B2"), freq=PWM_FREQ)
 
         # --- ultrasonic ---
-        self.echo = Pin(echo_pin, Pin.IN)
-        self.trigger = Pin(trigger_pin, Pin.OUT)
+        self.echo = Pin("US_ECHO", Pin.IN)
+        self.trigger = Pin("US_TRIGGER", Pin.OUT)
 
         # --- OLED ---
-        self.i2c = I2C(i2c_id, scl=Pin(scl_pin), sda=Pin(sda_pin), freq=i2c_freq)
-        self.oled = oled.OLED(self.i2c)
+        self.oled = OLED(I2C(1, scl=Pin("OLED_SCL"), sda=Pin("OLED_SDA"), freq=400_000))
         self.vssa = 32
 
         # --- encoders ---
-        self.left_enc  = Encoder(0, 0, (left_a, left_b))
-        self.right_enc = Encoder(0, 1, (right_a, right_b))
+        self.right_enc = Encoder(0, 1, (ENC_A1, ENC_A2))
+        self.left_enc  = Encoder(0, 0, (ENC_B1, ENC_B2))
 
         # --- line ---
-        sensors = [Pin(left_line, Pin.IN), Pin(middle_line, Pin.IN), Pin(right_line, Pin.IN)]
+        sensors = [
+            Pin("LINE_LEFT", Pin.IN), 
+            Pin("LINE_MID", Pin.IN), 
+            Pin("LINE_RIGHT", Pin.IN)
+            ]
         self.values = [1, 1, 1]
         sensor_index = {s: i for i, s in enumerate(sensors)}
 
@@ -67,7 +65,7 @@ class Atlas:
             s.irq(trigger=Pin.IRQ_FALLING | Pin.IRQ_RISING, handler=handle_sensor)
 
         # --- buzzer ---
-        self.buzzer = PWM(Pin(buzzer_pin)) 
+        self.buzzer = PWM(Pin("BUZZER")) 
         self.buzzer.freq(560)
         self._volume = 50
         self.buzzer.duty_u16(0)

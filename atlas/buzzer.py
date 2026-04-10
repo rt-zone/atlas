@@ -6,6 +6,7 @@ from machine import Pin, PWM
 from time import sleep_ms
 
 BUZZER_PIN = 18  # change to your buzzer pin (e.g. 15, 16, etc.)
+
 buzzer = PWM(Pin(BUZZER_PIN))
 buzzer.duty_u16(0)
 

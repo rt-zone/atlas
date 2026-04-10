@@ -5,7 +5,7 @@ import io
 import os
 import micropython
 import machine
-import ble_nus
+import atlas.ble.ble_nus as ble_nus
 
 _MP_STREAM_POLL = micropython.const(3)
 _MP_STREAM_POLL_RD = micropython.const(0x0001)
