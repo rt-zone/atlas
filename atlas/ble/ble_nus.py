@@ -2,6 +2,7 @@
 
 import bluetooth
 import struct
+import gc
 from micropython import const
 
 _IRQ_CENTRAL_CONNECT = const(1)
@@ -88,8 +89,10 @@ def advertising_payload(limited_disc=False, br_edr=False, name=None, services=No
 
 class BLEUART:
     def __init__(self, ble, name="mpy-uart", rxbuf=256):
+        gc.collect()
         self._ble = ble
-        self._ble.active(True)
+        if not self._ble.active():
+            self._ble.active(True)
         self._ble.irq(self._irq)
         ((self._tx_handle, self._rx_handle),) = self._ble.gatts_register_services((_UART_SERVICE,))
         # Increase the size of the rx buffer and enable append mode.

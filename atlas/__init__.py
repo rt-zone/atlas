@@ -1,21 +1,40 @@
 import time
 import math
 import _thread
-from machine import Pin, PWM, I2C, time_pulse_us
-from encoder import Encoder 
+from machine import Pin, PWM
 from PID import PID 
-from SSD1306 import SSD1306 as OLED
 
-# TODO:
-# Encoder library only accepts integer value for pins
-# Encoder pins are definied in Artiware through strings 
-# Temporary solution manually re-define encoder values here 
-ENC_A1	= 0
-ENC_A2	= 1
-ENC_B1	= 3
-ENC_B2	= 2
+from .modules.OLED import OLED
+from .modules.Ultrasonic import Ultrasonic
+from .modules.LineSensor import LineSensor
+from .modules.Buzzer import Buzzer
+from .movement.Encoders import encoders
 
 PWM_FREQ = 20_000
+
+def _speed2power(speed):
+    direction = 1 if speed > 0 else -1
+    return (abs(speed) ** 0.15 * direction)
+
+def _find_k(travel, degrees_need):
+        mds = 100
+        mdt = 100
+        k = 1
+        if degrees_need < (mds + mdt):
+            ds = degrees_need / 3
+            if travel <= ds:
+                k = travel / ds
+        else:
+            if travel <= mds:
+                k = travel / mds
+        return max(0.2, min(1, k))
+
+def _find_k_turn(travel, degrees_need):
+    mds = 50
+    k = 1
+    if travel <= mds:
+        k = (travel / mds) * 0.4
+    return max(0.1, min(0.4, k))
 
 class Atlas:
     _instance = None
@@ -37,66 +56,7 @@ class Atlas:
         self.left_in1 = PWM(Pin("MOTOR_B1"), freq=PWM_FREQ)
         self.left_in2 = PWM(Pin("MOTOR_B2"), freq=PWM_FREQ)
 
-        # --- ultrasonic ---
-        self.echo = Pin("US_ECHO", Pin.IN)
-        self.trigger = Pin("US_TRIGGER", Pin.OUT)
-
-        # --- OLED ---
-        self.oled = OLED(I2C(1, scl=Pin("OLED_SCL"), sda=Pin("OLED_SDA"), freq=400_000))
-        self.vssa = 32
-
-        # --- encoders ---
-        self.right_enc = Encoder(0, 1, (ENC_A1, ENC_A2))
-        self.left_enc  = Encoder(0, 0, (ENC_B1, ENC_B2))
-
-        # --- line ---
-        sensors = [
-            Pin("LINE_LEFT", Pin.IN), 
-            Pin("LINE_MID", Pin.IN), 
-            Pin("LINE_RIGHT", Pin.IN)
-            ]
-        self.values = [1, 1, 1]
-        sensor_index = {s: i for i, s in enumerate(sensors)}
-
-        def handle_sensor(pin):
-            self.values[sensor_index[pin]] = pin.value()
-
-        for s in sensors:
-            s.irq(trigger=Pin.IRQ_FALLING | Pin.IRQ_RISING, handler=handle_sensor)
-
-        # --- buzzer ---
-        self.buzzer = PWM(Pin("BUZZER")) 
-        self.buzzer.freq(560)
-        self._volume = 50
-        self.buzzer.duty_u16(0)
-
-        self.NOTE = {
-            "B3": 247,
-            "C4": 262,
-            "CS4": 277,
-            "D4": 294,
-            "DS4": 311,
-            "E4": 330,
-            "FS4": 370,
-            "GS4": 415,
-            "B4": 494,
-            "G4": 392, # fail
-            "A5": 880, # success
-            "B5": 988,
-            "C5": 523,
-            "D5": 587,
-            "E5": 659,
-        }
-
-        self.success_melody = [
-            self.NOTE["A5"], self.NOTE["B5"], self.NOTE["C5"], self.NOTE["B5"], self.NOTE["C5"], 
-            self.NOTE["D5"], self.NOTE["C5"], self.NOTE["D5"], self.NOTE["E5"], self.NOTE["D5"], 
-            self.NOTE["E5"], self.NOTE["E5"]
-        ]
-
-        self.fail_melody = [
-            self.NOTE["G4"], self.NOTE["C4"], self.NOTE["C4"]
-        ]
+        
 
         # --- PID setup (copy your tuned values) ---
         self.dt = 0.02
@@ -130,143 +90,11 @@ class Atlas:
         self._moving = False                # motor functions' state
         self._move_thread_running = False   # motor thread's state
 
-    # ---------------------------
-    # peripheries
-    # ---------------------------
-    # ultrasonic
-    def getUltrasonicCm(self):
-        self.trigger.value(0)
-        time.sleep_us(2)
-        self.trigger.value(1)
-        time.sleep_us(10)
-        self.trigger.value(0)
-        duration = time_pulse_us(self.echo, 1)
-        distance = (duration * 0.0343) / 2
-        return distance
-
-    # oled
-    def _print_line(self, msg):
-        line_height = 8
-        self.vssa -= line_height
-        if self.vssa < 0:
-            self.vssa = 0
-            return
-        # self.vscsad(self.vssa)
-        y = self.oled.height - line_height - self.vssa
-        self.oled.text(msg, 0, y)
-        self.oled.show()
-
-    def displayPrint(self, *args):
-        max_chars = self.oled.width // 8
-        msg = ("".join(str(a) for a in args))
-        
-        line = ""
-        for char in msg:
-            if char == '\n' or len(line) >= max_chars:
-                self._print_line(line)
-                line = "" if char == '\n' else char
-            else:
-                line += char
-            
-        if line:
-            self._print_line(line)
-
-    def displayClear(self):
-        self.vssa = 32
-        self.oled.fill(0)
-        self.oled.show()
-
-    # encoder
-    def getEncoderCount(self, motor):
-        if motor == 'A':
-            return self.left_enc.capture().count
-        else:
-            return self.right_enc.capture().count
-    
-    def getEncoderDegrees(self, motor):
-        if motor == 'A':
-            return self.left_enc.capture().degrees
-        else:
-            return self.right_enc.capture().degrees
-        
-    def getEncoderRotations(self, motor):
-        if motor == 'A':
-            return self.left_enc.capture().revolutions
-        else:
-            return self.right_enc.capture().revolutions
-
-    def getSpeedDegrees(self, motor):
-        if motor == 'A':
-            return self.left_enc.capture().degrees_per_second
-        else:
-            return self.right_enc.capture().degrees_per_second
-        
-    def getSpeedRotations(self, motor):
-        if motor == 'A':
-            return self.left_enc.capture().revolutions_per_second
-        else:
-            return self.right_enc.capture().revolutions_per_second
-
-    # line
-    def getLeftLight(self):
-        return self.values[0]
-    
-    def getMiddleLight(self):
-        return self.values[1]
-    
-    def getRightLight(self):
-        return self.values[2]
-
-    # buzzer
-    def buzzerVolume(self, v):
-        v = max(0.0, min(1.0, v / 100))
-        duty = v ** math.e
-        self.buzzer.duty_u16(int(65535 * (duty / 2)))
-
-    def buzzerSetVolume(self, v):
-        self._volume = v     
-        self.buzzerVolume(v)   
-
-    def buzzerStop(self):
-        self.buzzer.duty_u16(0)
-
-    def buzzerPlay(self, freq, volume, duration):
-        self.buzzer.freq(int(freq))
-        self.buzzerVolume(volume)
-        time.sleep(duration)
-        self.buzzerStop()
-
-    def buzzerPlayBeep(self):
-        self.buzzerPlay(2000, self._volume, 0.1)
-
-    def buzzerPlayBoop(self):
-        self.buzzerPlay(800, self._volume, 0.2)
-
-    def buzzerPlaySuccess(self):
-        for i in range(2):
-            for i in range(len(self.success_melody)):
-                note_freq = self.success_melody[i]
-                self.buzzerPlay(note_freq, self._volume, 0.07)
-
-            self.buzzerStop()
-            time.sleep(0.035)
-
-    def buzzerPlayFail(self):
-        for i in range(len(self.fail_melody)):
-            note_freq = self.fail_melody[i]
-            self.buzzerPlay(note_freq, self._volume / 2, 0.25)
-        self.buzzerStop()
-
-    def say(self, *args):
-        self.buzzerPlay(880, self._volume, 0.1)
-        self.buzzerPlay(988, self._volume, 0.1)
-        self.displayClear()
-        self.displayPrint(*args)
 
     # ---------------------------
     # motor helpers
     # ---------------------------
-    def set_motor(self, pwm1, pwm2, speed):
+    def _set_motor(self, pwm1, pwm2, speed):
         # speed expected -1..1, but original code used 0..1 only for forward
         if speed >= 0:
             pwm1.duty_u16(int(max(0, speed) * 65535))
@@ -274,28 +102,21 @@ class Atlas:
         else:
             pwm1.duty_u16(0)
             pwm2.duty_u16(int(max(0, -speed) * 65535))
-
-    def move(self, left_speed, right_speed):
-        # left_speed/right_speed between -1 and 1
-        self.set_motor(self.left_in1, self.left_in2, left_speed)
-        self.set_motor(self.right_in1, self.right_in2, right_speed)
-
-    def relMove(self, left_speed, right_speed):
-        l = 1
-        r = 1
-        if left_speed < 0:
-            l = -1
-        if right_speed < 0:
-            r = -1
-        left_speed = abs(left_speed) ** 0.15
-        right_speed = abs(right_speed) ** 0.15
-        self.move(left_speed * l, right_speed * r)
-        print(right_speed, left_speed, l, r)
     
-    def stopSmooth(self):
-        left_speed  = self.left_enc.capture().revolutions_per_second / 4
-        right_speed = self.right_enc.capture().revolutions_per_second / 4
+    def _move(self, left_speed, right_speed):
+        # left_speed/right_speed between -1 and 1
+        left_power = _speed2power(left_speed)
+        right_power = _speed2power(right_speed)
         
+        self._set_motor(self.left_in1, self.left_in2, left_power)
+        self._set_motor(self.right_in1, self.right_in2, right_power)
+
+    
+    def _stop_smooth(self):
+        left_speed  = encoders('A').capture().revolutions_per_second / 4
+        right_speed = encoders('B').capture().revolutions_per_second / 4
+
+
         l = -1
         r = -1
         if left_speed <= 0:
@@ -304,14 +125,14 @@ class Atlas:
             r = 1
 
         sleep_time = abs(left_speed + right_speed) / 40
-        self.move(l,r)
+        self._move(l,r)
         time.sleep(sleep_time)
-        self.move(0,0)
+        self._move(0,0)
         time.sleep(0.5)
         self._moving = False
         print("smooth stop")
 
-    def stopMoveFunction(self): # stop thread, don't stop moving
+    def _stop_move_thread(self): # stop thread, don't stop moving
         if self._move_thread_running:
             self._stop = True
         t = time.ticks_ms()
@@ -322,21 +143,24 @@ class Atlas:
                 break
         print("thread stopped")
 
-    def stopMove(self):
-        self.stopMoveFunction()
-        self.stopSmooth()
+    def stop_move(self):
+        self._stop_move_thread()
+        self._stop_smooth()
 
     # ---------------------------
     # tune / speed
     # ---------------------------
-    def setMoveSpeed(self, percent):
+    def set_move_speed(self, percent):
+        """
+            Speed in percents (0 - 100)
+        """
         speed = max(0, min(100, percent)) / 100.0
         self.MoveSpeed = speed
-        self.LeftSpeed = speed
-        self.RightSpeed = speed
-
+        self.set_speed('A', speed)
+        self.set_speed('B', speed)
+        
     # Movement w/o PID
-    def setSpeed(self, letter, percent):
+    def set_speed(self, letter, percent):
         speed = max(0, min(100, percent)) / 100.0
         if letter == 'A':
             self.LeftSpeed = speed
@@ -348,41 +172,14 @@ class Atlas:
         right_speed = max(0, min(100, right)) / 100.0
         self.LeftSpeed = left_speed
         self.RightSpeed = right_speed
-        self.stopMoveFunction()
-        self.relMove(self.LeftSpeed, self.RightSpeed)
+        self._stop_move_thread()
+        self._move(self.LeftSpeed, self.RightSpeed)
 
     # ---------------------------
     # single motor movement
     # ---------------------------
-    def moveMotorDegrees(self, letter, distance_deg):
-        direction = 1 if distance_deg >= 0 else -1
-        distance_deg = abs(distance_deg)
 
-        if letter == 'A':
-            start_left = self.left_enc.capture().degrees
-            self.set_motor(self.left_in1, self.left_in2, self.LeftSpeed * direction)
 
-            try: 
-                while True:
-                    left_cap  = self.left_enc.capture().degrees
-                    left_travel = abs(left_cap - start_left)
-                    if (left_travel >= distance_deg):
-                        break
-            finally:
-                self.set_motor(self.left_in1, self.left_in2, 0)
-
-        else: 
-            start_right = self.right_enc.capture().degrees
-            self.set_motor(self.right_in1, self.right_in2, self.RightSpeed * direction)
-            
-            try: 
-                while True:
-                    right_cap = self.right_enc.capture().degrees
-                    right_travel = abs(right_cap - start_right)
-                    if (right_travel >= distance_deg):
-                        break
-            finally:
-                self.set_motor(self.left_in1, self.left_in2, 0)
 
     def moveMotorRotations(self, letter, distance_rev):
         distance_deg = distance_rev * 360
@@ -398,43 +195,25 @@ class Atlas:
         seconds = abs(seconds)
 
         if letter == 'A':
-            self.set_motor(self.left_in1, self.left_in2, self.LeftSpeed * direction)
+            self._set_motor(self.left_in1, self.left_in2, self.LeftSpeed * direction)
             time.sleep(seconds)
-            self.set_motor(self.left_in1, self.left_in2, 0)
+            self._set_motor(self.left_in1, self.left_in2, 0)
             
         else: 
-            self.set_motor(self.right_in1, self.right_in2, self.RightSpeed * direction)
+            self._set_motor(self.right_in1, self.right_in2, self.RightSpeed * direction)
             time.sleep(seconds)
-            self.set_motor(self.left_in1, self.left_in2, 0)
+            self._set_motor(self.left_in1, self.left_in2, 0)
 
     def stopMotor(self, letter):
         if letter == 'A':
-            self.set_motor(self.left_in1, self.left_in2, 0)
+            self._set_motor(self.left_in1, self.left_in2, 0)
         else:
-            self.set_motor(self.right_in1, self.right_in2, 0)
+            self._set_motor(self.right_in1, self.right_in2, 0)
     
     # ---------------------------
     # helper used by both threaded and direct calls
     # ---------------------------
-    def _find_k(self, travel, degrees_need):
-        mds = 100
-        mdt = 100
-        k = 1
-        if degrees_need < (mds + mdt):
-            ds = degrees_need / 3
-            if travel <= ds:
-                k = travel / ds
-        else:
-            if travel <= mds:
-                k = travel / mds
-        return max(0.2, min(1, k))
-
-    def _find_k_turn(self, travel, degrees_need):
-        mds = 50
-        k = 1
-        if travel <= mds:
-            k = (travel / mds) * 0.4
-        return max(0.1, min(0.4, k))
+    
 
     # ---------------------------
     # turning (will also honor stop flag)
@@ -448,27 +227,27 @@ class Atlas:
         distance_deg = turn_degrees * self.MAGIC_TURN_CONVERTER
 
         if turn_degrees >= 360:
-            distance_to_stop = 62 # 360+
+            degrees_to_stop = 62 # 360+
         elif turn_degrees >= 270:
-            distance_to_stop = 70 # 270
+            degrees_to_stop = 70 # 270
         elif turn_degrees >= 180:
-            distance_to_stop = 70 # 180
+            degrees_to_stop = 70 # 180
         elif turn_degrees >= 90: 
-            distance_to_stop = 74 # 90
+            degrees_to_stop = 74 # 90
         elif turn_degrees >= 80:
-            distance_to_stop = 70 # 70
+            degrees_to_stop = 70 # 70
         elif turn_degrees >= 70:
-            distance_to_stop = 60 # 70
+            degrees_to_stop = 60 # 70
         elif turn_degrees >= 60:
-            distance_to_stop = 50 # 60
+            degrees_to_stop = 50 # 60
         elif turn_degrees >= 45:
-            distance_to_stop = 25 # 45
+            degrees_to_stop = 25 # 45
         else:
-            distance_to_stop = turn_degrees / 2 
+            degrees_to_stop = turn_degrees / 2 
 
 
-        start_left = self.left_enc.capture().degrees
-        start_right = self.right_enc.capture().degrees
+        start_left = encoders('A').capture().degrees
+        start_right = encoders('B').capture().degrees
 
         self.left_pos_pid.setpoint = distance_deg
         self.right_pos_pid.setpoint = distance_deg
@@ -483,8 +262,8 @@ class Atlas:
                     self._stop = False
                     return
 
-                left_cap  = self.left_enc.capture()
-                right_cap = self.right_enc.capture()
+                left_cap  = encoders('A').capture()
+                right_cap = encoders('B').capture()
 
                 left_travel = (left_cap.degrees - start_left) * a
                 right_travel = (right_cap.degrees - start_right) * (-a)
@@ -493,13 +272,13 @@ class Atlas:
                 left_speed = (left_cap.revolutions_per_second * a) / 4
                 right_speed = (right_cap.revolutions_per_second * (-a)) / 4
 
-                if (travel >= distance_deg - distance_to_stop):
+                if (travel >= distance_deg - degrees_to_stop):
                     break
 
                 left_vel = self.left_pos_pid.calculate(left_travel)
                 right_vel = self.right_pos_pid.calculate(right_travel)
 
-                k = self._find_k_turn(travel, distance_deg)
+                k = _find_k_turn(travel, distance_deg)
 
                 self.left_vel_pid.setpoint = max(min(left_vel, k), -k)
                 self.right_vel_pid.setpoint = max(min(right_vel, k), -k)
@@ -521,11 +300,11 @@ class Atlas:
 
                 final_left = last_left_cmd * a
                 final_right = last_right_cmd * (-a)
-                self.relMove(final_left, final_right)
+                self._move(final_left, final_right)
 
                 time.sleep(self.dt)
         finally:
-            self.stopSmooth()
+            self._stop_smooth()
 
     def turnRightDegrees(self, degrees):
         self.turn(degrees)
@@ -544,8 +323,8 @@ class Atlas:
         distance_rev = distance_cm / self.wheel_circ
         distance_deg = distance_rev * 360 + 90
 
-        start_left = self.left_enc.capture().degrees
-        start_right = self.right_enc.capture().degrees
+        start_left = encoders('A').capture().degrees
+        start_right = encoders('B').capture().degrees
 
         self.left_pos_pid_f.setpoint = distance_deg
         self.right_pos_pid_f.setpoint = distance_deg
@@ -560,8 +339,8 @@ class Atlas:
                     self._stop = False
                     return
 
-                left_cap  = self.left_enc.capture()
-                right_cap = self.right_enc.capture()
+                left_cap  = encoders('A').capture()
+                right_cap = encoders('B').capture()
 
                 # use average of absolute degrees travelled
                 left_travel = abs(left_cap.degrees - start_left)
@@ -572,13 +351,13 @@ class Atlas:
                 right_speed = abs(right_cap.revolutions_per_second) / 4
 
                 if traveled >= distance_deg - 90:
-                    self.stopSmooth()
+                    self._stop_smooth()
                     break
 
                 left_vel = self.left_pos_pid_f.calculate(left_travel)
                 right_vel = self.right_pos_pid_f.calculate(right_travel)
 
-                k = self._find_k(traveled, distance_deg)
+                k = _find_k(traveled, distance_deg)
 
                 self.left_vel_pid_f.setpoint = max(min(left_vel, self.MoveSpeed), -self.MoveSpeed)
                 self.right_vel_pid_f.setpoint = max(min(right_vel, self.MoveSpeed), -self.MoveSpeed)
@@ -599,7 +378,7 @@ class Atlas:
                 last_right_cmd = max(min(last_right_cmd, self.MoveSpeed), 0)
 
                 # apply forward/backward direction
-                self.relMove(last_left_cmd * direction, last_right_cmd * direction)
+                self._move(last_left_cmd * direction, last_right_cmd * direction)
 
                 time.sleep(self.dt)
         finally:
@@ -642,11 +421,11 @@ class Atlas:
 
     # infinite movement methods that return immediately (if _thread is available)
     def moveForward(self):
-        self.stopMoveFunction()       
+        self._stop_move_thread()       
         """Start moving forward indefinitely (non-blocking when _thread available)."""
         self._start_threaded(self.moveForwardCm, 100000)
 
     def moveBackward(self):
-        self.stopMoveFunction()
+        self._stop_move_thread()
         """Start moving backward indefinitely (non-blocking when _thread available)."""
         self._start_threaded(self.moveForwardCm, -100000)       

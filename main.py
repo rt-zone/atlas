@@ -1,5 +1,5 @@
 from atlas import Atlas
 
-atlas = Atlas() 
+atlas = Atlas()
 
-atlas.moveForwardCm(20)
+atlas.moveForwardCm(30)

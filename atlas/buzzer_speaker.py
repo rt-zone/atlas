@@ -124,9 +124,4 @@ def say_word(word: str):
     slide(700, 1000, 120)
     tone(0, 120)
 
-# --- demo --------------------------------------------------------------------
-try:
-    say_word("HELLO")
-finally:
-    buzzer.duty_u16(0)
-    buzzer.deinit()
+
