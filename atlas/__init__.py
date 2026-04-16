@@ -8,7 +8,6 @@ from .modules.OLED import OLED
 from .modules.Ultrasonic import Ultrasonic
 from .modules.LineSensor import LineSensor
 from .modules.Buzzer import Buzzer
-from .movement.Encoders import encoders
 
 PWM_FREQ = 20_000
 
