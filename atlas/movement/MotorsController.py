@@ -39,8 +39,8 @@ class MotorsController:
 
     def move(self, left_speed, right_speed):
         """ left_speed/right_speed between -1 and 1 """
-        self.motor_a.move(left_speed)
-        self.motor_b.move(right_speed)
+        self.motor_a.set_speed(left_speed)
+        self.motor_b.set_speed(right_speed)
     
     
     def turn(self, turn_degrees):

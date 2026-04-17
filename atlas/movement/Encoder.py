@@ -9,8 +9,8 @@ ENC_A1	= 0
 ENC_A2	= 1
 ENC_B1	= 3 
 ENC_B2	= 2
-
 MAX_RPS = 4 # Theoretical, imperically measuresd maximum rotations per second
+
 def get_pins_by_letter(motor_letter):
     p1, p2 = None, None
     if motor_letter == 'A':
@@ -33,6 +33,7 @@ class Encoder(_Encoder):
         self.handlers = []
         self.irq_pin = Pin(pins[0], Pin.IN)
         self.irq_pin.irq(trigger=Pin.IRQ_RISING|Pin.IRQ_FALLING, handler=self._handle_irq)
+        self.COUNTS_PER_REV = self.counts_per_rev()
 
     def __call__(self):
         return self.capture()
@@ -59,7 +60,7 @@ class Encoder(_Encoder):
     def get_degrees(self):
         return self.capture().degrees
 
-    def get_rotations(self):
+    def get_revolutions(self):
         return self.capture().revolutions
 
     def get_speed_degrees(self):
@@ -67,6 +68,3 @@ class Encoder(_Encoder):
         
     def get_speed(self):
         return self.capture().revolutions_per_second / MAX_RPS
-
-# TODO: or not TODO, fix this pattern by providing true singleton
-# Pseudo - singleton
