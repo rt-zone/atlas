@@ -1,9 +1,7 @@
+from atlas import mc 
 
-from atlas.movement.Motor import Motor
 
-ma = Motor('A')
-mb = Motor('B')
-
-print(ma.encoder.get_count())
 while True:
-    print(ma.encoder.get_count(), mb.encoder.get_count())
+    enca = mc.motor_a.encoder.get_count()
+    encb = mc.motor_b.encoder.get_count()
+    print(enca, encb)

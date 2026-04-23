@@ -4,15 +4,11 @@ from math import pi
 from .pid import PID
 
 PWM_FREQ = 20_000
-WHEEL_DIAMETER_CM = 4.5
-WHEEL_CIRCUMFERENCE = pi * WHEEL_DIAMETER_CM
 HOLD_COEFFICIENT = 0.003
 HOLD_ERROR = 3
 MAGIC_POWER_COEFFICIENT = 0.15
-
-COUNTS_PER_REV = 357.75
 PID_PERIOD = 0.01
-DECEL_COUNTS = 500
+DECEL_COUNTS = 2000
 
 def clamp(x, lo=-1.0, hi=1.0):
     return max(lo, min(hi, x))
@@ -21,7 +17,6 @@ def _find_k(travel, target_counts):
     md = 400
     k = 1.0
 
-    # --- Ramp UP (start) ---
     if target_counts < md:
         ds = target_counts / 3
         if travel <= ds:
@@ -30,17 +25,11 @@ def _find_k(travel, target_counts):
         if travel <= md / 2:
             k = travel / (md / 2)
 
-    # --- Ramp DOWN (end) ---
-    remaining = target_counts - travel
-    decel_zone = min(md / 2, target_counts / 3)
-    if remaining < decel_zone and decel_zone > 0:
-        k = min(k, remaining / decel_zone)
-
     return max(0.2, min(1.0, k))
 
 # TODO: Add timer manager like in buzzer
 class Motor:
-    def __init__(self, motor_letter, velocity=1):
+    def __init__(self, motor_letter, velocity=1.0):
         pin1, pin2 = None, None
         if motor_letter == 'A':
             pin1 = "MOTOR_A1"
@@ -58,7 +47,7 @@ class Motor:
         self.encoder = Encoder(motor_letter)
         
         self.pos_pid = PID(0.001, 0.001, 0.001,PID_PERIOD)
-        self.vel_pid = PID(36,    0.001, 0.001, PID_PERIOD)
+        self.vel_pid = PID(30,    0.001, 0.01, PID_PERIOD)
 
         self._move_pid_timer = Timer()
         self._hold_timer = Timer()
@@ -88,10 +77,10 @@ class Motor:
         remaining = target - travel
 
         # Ramp up based on how far we've traveled
-        accel_speed = _find_k(travel, target) * self.velocity
-
+        k = _find_k(travel, target) * self.velocity
+        accel_speed = k
         # Ramp down based on how far we have left
-        decel_speed = clamp(remaining / DECEL_COUNTS, 0.2, self.velocity)
+        decel_speed = clamp(remaining / DECEL_COUNTS, 0.05, self.velocity)
 
         # Whichever profile is more restrictive wins
         self.vel_pid.setpoint = min(accel_speed, decel_speed)
@@ -100,12 +89,10 @@ class Motor:
         speed = abs(self.encoder.get_speed())
         accel = self.vel_pid.calculate(speed)
 
-        increment = accel * PID_PERIOD
-        if increment > 0:
-            increment *= _find_k(travel, target) ** 2  # only gate acceleration, not braking
+        increment = k*k*accel * PID_PERIOD
 
         self.motor_cmd += increment
-        self.motor_cmd = clamp(self.motor_cmd, 0, self.velocity)
+        self.motor_cmd = clamp(self.motor_cmd, 0, 1)
         return self.motor_cmd
     def _get_travel(self):
         return abs(self.encoder.get_count() - self.start_count)
@@ -125,44 +112,33 @@ class Motor:
         self.vel_pid.setpoint = 0
         self.motor_cmd = 0.0
     
-    def _move_pid_tick(self, direction, on_complete, timer):
-        travel = abs(self.encoder.get_count() - self.start_count)
-        if travel >= abs(self.distance_count):
-            self.hold(self.start_count + self.distance_count)
-            if on_complete:
-                on_complete()
-            timer.deinit()
+    def stop(self):
+        self._stop_all_timers()
+        self.set_speed(0)
+
+    def _hold_handler(self, timer):
+        distance = self.hold_position - self.encoder.get_count()
+        if abs(distance) < HOLD_ERROR:
+            self.set_speed(0)
             return
+        self.set_speed(distance * HOLD_COEFFICIENT)
 
-        cmd = self._calculate_cmd(travel, abs(self.distance_count))
-        self.set_speed(cmd * direction)
+# Timer based hold function
+    def hold(self, hold_position = None):
+        if hold_position is not None:
+            self.hold_position = hold_position
+        else:
+            self.hold_position = self.encoder.get_count()
 
+        self._hold_timer.init(mode=Timer.PERIODIC, freq=int(1/PID_PERIOD), callback=self._hold_handler)
 
-    def _move_by_counts(self, distance_count, on_complete=None):
-        direction = 1 if distance_count >=0 else -1
-
+    def release(self):
         self._hold_timer.deinit()
-        self._move_pid_timer.deinit()
-        self._move_seconds_timer.deinit()
-        
-        self.start_count = self.encoder.get_count()
-        self.distance_count = distance_count
 
-        self.pos_pid.reset()
-        self.vel_pid.reset()
-        
-        self.pos_pid.setpoint = abs(self.distance_count)
-        self.vel_pid.setpoint = 0
 
-        self.motor_cmd = 0.0
 
-        self._move_pid_timer.init(
-            mode=Timer.PERIODIC, 
-            freq=int(1/PID_PERIOD), 
-            callback=lambda t: self._move_pid_tick(direction, on_complete, t)
-        )
 
-      
+
     
     def move_revolutions(self, distance_rev, on_complete=None):
         target_count = int(distance_rev * COUNTS_PER_REV)
@@ -195,26 +171,3 @@ class Motor:
             callback=move_by_seconds_handler
             )
 
-
-    def stop(self):
-        self._stop_all_timers()
-        self.set_speed(0)
-
-    def _hold_handler(self, timer):
-        distance = self.hold_position - self.encoder.get_count()
-        if abs(distance) < HOLD_ERROR:
-            self.set_speed(0)
-            return
-        self.set_speed(distance * HOLD_COEFFICIENT)
-
-# Timer based hold function
-    def hold(self, hold_position = None):
-        if hold_position is not None:
-            self.hold_position = hold_position
-        else:
-            self.hold_position = self.encoder.get_count()
-
-        self._hold_timer.init(mode=Timer.PERIODIC, freq=int(1/PID_PERIOD), callback=self._hold_handler)
-
-    def release(self):
-        self._hold_timer.deinit()
