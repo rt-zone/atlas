@@ -27,6 +27,12 @@ class Encoder(_Encoder):
         self.motor_letter = motor_letter
 
         enc_id = 0 if motor_letter == 'A' else 1
+        if motor_letter == "A":
+            enc_id = 0
+        elif motor_letter == "B":
+            enc_id = 1
+        else:
+            raise ValueError (f"Wrong Encoder Letter: {motor_letter}. Use 'A' or 'B'")
         pins = get_pins_by_letter(motor_letter)
         super().__init__(0, enc_id, pins)
 

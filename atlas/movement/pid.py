@@ -24,4 +24,3 @@ class PID:
         self.setpoint = 0
         self._error_sum = 0
         self._last_value = 0
-        

@@ -6,4 +6,4 @@ mb = Motor('B')
 
 print(ma.encoder.get_count())
 while True:
-    print(ma.encoder.get_count())
+    print(ma.encoder.get_count(), mb.encoder.get_count())

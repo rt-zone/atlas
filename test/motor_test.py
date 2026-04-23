@@ -1,29 +1,24 @@
-from atlas.movement.Motor import Motor
-ma = Motor('A')
-mb = Motor('B')
-
-def print_info(motor : Motor):
-    print(motor.letter, motor.encoder.get_revolutions(), motor.encoder.get_count())
-
-ma.move_cm(100, lambda: print_info(ma))
-mb.move_cm(100, lambda: print_info(mb))
-
+from atlas.movement.MotorController import MotorController
 from time import sleep
-sleep(5)
+mc = MotorController()
+mc.move(1000)
+sleep(3)
+mc.move(-1000)
+sleep(3)
+mc.move(3000)
+sleep(4)
+mc.move(-3000)
+# from atlas.movement.Motor import Motor
 
-ma.move_cm(-100, lambda: print_info(ma))
-mb.move_cm(-100, lambda: print_info(mb))
 
+# ma = Motor("A")
+# mb = Motor("B")
 
-try:
-    max_speed = 0
-    while True:
-        speed = abs(ma.encoder.get_speed())
-        max_speed = max(max_speed, speed)
-        pass
-finally:
-    print(max_speed)
-    ma.stop()   
-    ma.release()
-    mb.stop()
-    mb.release()
+# ma._move_by_counts(1000)
+# mb._move_by_counts(1000)
+# ma.set_speed(1)
+# mb.set_speed(1)
+
+while True:
+    print(mc.motor_a.encoder.get_count(), mc.motor_b.encoder.get_count())
+    pass    
