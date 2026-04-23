@@ -20,5 +20,5 @@ mc.move(-3000)
 # mb.set_speed(1)
 
 while True:
-    print(mc.motor_a.encoder.get_count(), mc.motor_b.encoder.get_count())
+    # print(mc.motor_a.encoder.get_count(), mc.motor_b.encoder.get_count())
     pass    
